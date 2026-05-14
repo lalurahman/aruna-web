@@ -5,9 +5,10 @@
 # =============================================================================
 FROM php:8.3-cli-alpine AS builder
 
-# Install Node 20, npm, sqlite, and minimal PHP extensions for artisan
-RUN apk add --no-cache nodejs npm sqlite \
-    && docker-php-ext-install pdo pdo_sqlite
+# Install Node 20, npm, and sqlite-dev headers for pdo_sqlite compilation.
+# Note: `pdo` is already compiled into PHP — only pdo_sqlite needs installing.
+RUN apk add --no-cache nodejs npm sqlite-dev \
+    && docker-php-ext-install pdo_sqlite
 
 # Install Composer binary
 COPY --from=composer:2.8 /usr/bin/composer /usr/bin/composer
