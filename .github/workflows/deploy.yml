@@ -102,38 +102,49 @@ jobs:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
         env:
-          # Pass GHCR credentials and image name as env vars to the remote shell.
-          # appleboy/ssh-action masks these values in logs.
+          # All values passed as env vars to the remote shell (masked in logs).
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           GHCR_USER: ${{ github.actor }}
+          # GHCR requires lowercase image names; tr ensures compatibility
+          # regardless of how github.repository is cased.
           APP_IMAGE: ${{ needs.build.outputs.image }}
+          APP_DIR: ${{ secrets.VPS_APP_PATH }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_SSH_PORT || 22 }}
-          envs: GHCR_TOKEN,GHCR_USER,APP_IMAGE
+          envs: GHCR_TOKEN,GHCR_USER,APP_IMAGE,APP_DIR
           script: |
             set -e
 
+            # ── 0. Pre-flight checks ──────────────────────────────────────────
+            echo "→ [0/8] Pre-flight checks"
+            docker info   > /dev/null 2>&1 || { echo "ERROR: Docker daemon is not running"; exit 1; }
+            docker compose version > /dev/null 2>&1 || { echo "ERROR: Docker Compose v2 is not available (need 'docker compose', not 'docker-compose')"; exit 1; }
+
             # ── 1. Navigate to project directory ─────────────────────────────
-            echo "→ [1/7] Navigating to ${{ secrets.VPS_APP_PATH }}"
-            cd "${{ secrets.VPS_APP_PATH }}"
+            echo "→ [1/8] Navigating to ${APP_DIR}"
+            [ -d "$APP_DIR" ] || { echo "ERROR: Directory '${APP_DIR}' not found on VPS. Clone the repo first."; exit 1; }
+            cd "$APP_DIR"
 
             # ── 2. Pull latest code (docker-compose.yml, nginx config, etc.) ─
-            # Note: the VPS deploy key must have read access to the GitHub repo.
-            # Generate one with: ssh-keygen -t ed25519 -C "vps-deploy"
-            # Add the public key as a GitHub Deploy Key (read-only).
-            echo "→ [2/7] Pulling latest code from GitHub"
+            # The VPS must have a deploy key with read access to the GitHub repo.
+            # Generate one: ssh-keygen -t ed25519 -C "vps-deploy"
+            # Add the public key as a read-only GitHub Deploy Key.
+            echo "→ [2/8] Pulling latest code from GitHub"
             git pull origin main
 
             # ── 3. Login to GHCR and pull the pre-built image ────────────────
-            echo "→ [3/7] Logging in to GHCR and pulling image: $APP_IMAGE"
+            # Normalise to lowercase — GHCR stores all image names in lowercase.
+            APP_IMAGE=$(echo "$APP_IMAGE" | tr '[:upper:]' '[:lower:]')
+            echo "→ [3/8] Logging in to GHCR and pulling: ${APP_IMAGE}"
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
             docker pull "$APP_IMAGE"
 
             # ── 4. Update APP_IMAGE in .env so Compose uses the GHCR image ───
-            echo "→ [4/7] Updating APP_IMAGE in .env"
+            echo "→ [4/8] Updating APP_IMAGE in .env"
+            [ -f .env ] || { echo "ERROR: .env not found at $(pwd)/.env — copy .env.example and fill in your values."; exit 1; }
             if grep -q '^APP_IMAGE=' .env; then
               sed -i "s|^APP_IMAGE=.*|APP_IMAGE=${APP_IMAGE}|" .env
             else
@@ -141,20 +152,21 @@ jobs:
             fi
 
             # ── 5. Remove stale public assets volume (rebuilt from new image) ─
-            echo "→ [5/7] Removing stale public assets volume"
+            echo "→ [5/8] Removing stale public assets volume"
             docker volume rm aruna_web_public 2>/dev/null || true
 
             # ── 6. Restart app container with new image ───────────────────────
             #       --no-deps keeps db and redis running without interruption
-            echo "→ [6/7] Restarting app container"
+            echo "→ [6/8] Restarting app container"
             docker compose up -d --no-deps app
 
             # ── 7. Give app a moment to initialise, then refresh nginx ────────
-            echo "→ [7/7] Refreshing nginx"
+            echo "→ [7/8] Refreshing nginx"
             sleep 5
             docker compose up -d --no-deps nginx
 
             # ── 8. Remove dangling images to save disk space ──────────────────
+            echo "→ [8/8] Pruning old images"
             docker image prune -f
 
             echo "✓ Deployment complete."
