@@ -11,16 +11,16 @@
 .env.backup
 .env.production
 
-# Dependencies — installed inside the builder stage
+# Dependencies — installed inside the vendor stage
 /node_modules
 /vendor
 
-# Frontend build output — built inside the builder stage
-/public/build
+# Frontend build output — pre-built on the CI runner, included in Docker context
 /public/hot
 /public/fonts-manifest.dev.json
 
-# Generated Wayfinder TypeScript files — regenerated inside the builder stage
+# Generated Wayfinder TypeScript files — only needed during the npm build step;
+# not required in the production image (compiled output is in public/build/)
 /resources/js/wayfinder
 /resources/js/actions
 /resources/js/routes

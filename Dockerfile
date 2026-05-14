@@ -16,58 +16,9 @@ RUN composer install \
 
 
 # =============================================================================
-# Stage 2 — Builder: generate Wayfinder TS types + compile frontend assets
-#   Installs ALL Composer deps (including dev) so that every service provider
-#   and artisan command is available when Laravel bootstraps.
-# =============================================================================
-FROM php:8.4-cli-alpine AS builder
-
-# Full set of extensions Laravel needs to bootstrap (bcmath, intl, zip, etc.)
-# plus Node 20 + npm for the Vite build step.
-RUN apk add --no-cache \
-    nodejs npm git unzip \
-    sqlite-dev oniguruma-dev \
-    libzip-dev icu-dev \
-    && docker-php-ext-install \
-    pdo_sqlite mbstring bcmath intl zip
-
-COPY --from=composer:2.8 /usr/bin/composer /usr/bin/composer
-
-WORKDIR /app
-
-# ── Install ALL Composer deps (dev included) so artisan commands are complete ─
-COPY composer.json composer.lock ./
-RUN composer install \
-    --no-interaction \
-    --no-scripts \
-    --prefer-dist \
-    --ignore-platform-reqs
-
-# ── Install Node dependencies ─────────────────────────────────────────────────
-COPY package.json package-lock.json ./
-RUN npm ci
-
-# ── Copy full application source ──────────────────────────────────────────────
-COPY . .
-
-# ── Bootstrap a minimal .env so artisan can run ───────────────────────────────
-RUN cp .env.example .env \
-    && php artisan key:generate --ansi \
-    && mkdir -p database \
-    && touch database/database.sqlite
-
-# ── Register service providers (skipped by --no-scripts) ─────────────────────
-RUN php artisan package:discover --ansi
-
-# ── Generate Wayfinder TypeScript bindings from PHP routes/actions ────────────
-RUN php artisan wayfinder:generate
-
-# ── Build production frontend assets with Vite ────────────────────────────────
-RUN npm run build
-
-
-# =============================================================================
-# Stage 3 — Production PHP-FPM
+# Stage 2 — Production PHP-FPM
+#   Wayfinder TS bindings and frontend assets are pre-built on the CI runner
+#   (deploy.yml) and included in the Docker build context via public/build/.
 # =============================================================================
 FROM php:8.4-fpm-alpine AS app
 
@@ -98,14 +49,15 @@ RUN apk add --no-cache \
 WORKDIR /var/www/html
 
 # Copy application source from build context
-# (vendor, node_modules, public/build, .env excluded via .dockerignore)
+# (vendor, node_modules, .env excluded via .dockerignore;
+#  public/build is pre-built on CI and included in context)
 COPY --chown=www-data:www-data . .
 
 # Production vendor from Stage 1 (no dev deps — smaller, secure)
 COPY --from=vendor --chown=www-data:www-data /app/vendor ./vendor
 
-# Built frontend assets from Stage 2
-COPY --from=builder --chown=www-data:www-data /app/public/build ./public/build
+# Composer binary needed for dump-autoload below
+COPY --from=composer:2.8 /usr/bin/composer /usr/bin/composer
 
 # Generate optimised autoloader with app source + production vendor
 RUN composer dump-autoload --no-dev --optimize --classmap-authoritative
