@@ -140,12 +140,22 @@ jobs:
             # ── 3. Login to GHCR and pull the pre-built image ────────────────
             # Normalise to lowercase — GHCR stores all image names in lowercase.
             APP_IMAGE=$(echo "$APP_IMAGE" | tr '[:upper:]' '[:lower:]')
-            echo "→ [3/8] Logging in to GHCR and pulling: ${APP_IMAGE}"
+            echo "→ [3/9] Logging in to GHCR and pulling: ${APP_IMAGE}"
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
             docker pull "$APP_IMAGE"
 
-            # ── 4. Update APP_IMAGE in .env so Compose uses the GHCR image ───
-            echo "→ [4/8] Updating APP_IMAGE in .env"
+            # ── 4. Extract compiled frontend assets from image → serve path ──
+            # public/build/ is built inside Docker (Stage 2 builder) and does not
+            # exist in the git repo. Copy it out of the image into the live path.
+            echo "→ [4/9] Extracting public/build from Docker image"
+            docker rm _build_extract 2>/dev/null || true
+            docker create --name _build_extract "$APP_IMAGE"
+            mkdir -p "${APP_DIR}/public"
+            docker cp _build_extract:/var/www/html/public/build "${APP_DIR}/public/"
+            docker rm _build_extract
+
+            # ── 5. Update APP_IMAGE in .env so Compose uses the GHCR image ───
+            echo "→ [5/9] Updating APP_IMAGE in .env"
             [ -f .env ] || { echo "ERROR: .env not found at $(pwd)/.env — copy .env.example and fill in your values."; exit 1; }
             if grep -q '^APP_IMAGE=' .env; then
               sed -i "s|^APP_IMAGE=.*|APP_IMAGE=${APP_IMAGE}|" .env
@@ -154,21 +164,21 @@ jobs:
             fi
 
             # ── 5. Remove stale public assets volume (rebuilt from new image) ─
-            echo "→ [5/8] Removing stale public assets volume"
+            echo "→ [6/9] Removing stale public assets volume"
             docker volume rm aruna_web_public 2>/dev/null || true
 
             # ── 6. Restart app container with new image ───────────────────────
             #       --no-deps keeps db and redis running without interruption
-            echo "→ [6/8] Restarting app container"
+            echo "→ [7/9] Restarting app container"
             docker compose up -d --no-deps app
 
             # ── 7. Give app a moment to initialise, then refresh nginx ────────
-            echo "→ [7/8] Refreshing nginx"
+            echo "→ [8/9] Refreshing nginx"
             sleep 5
             docker compose up -d --no-deps nginx
 
             # ── 8. Remove dangling images to save disk space ──────────────────
-            echo "→ [8/8] Pruning old images"
+            echo "→ [9/9] Pruning old images"
             docker image prune -f
 
             echo "✓ Deployment complete."
