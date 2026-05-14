@@ -54,7 +54,7 @@ services:
   # ─── MySQL Database ──────────────────────────────────────────────────────────
   db:
     image: mysql:8.0
-    container_name: aruna
+    container_name: aruna_db
     restart: unless-stopped
     environment:
       MYSQL_DATABASE: ${DB_DATABASE}
