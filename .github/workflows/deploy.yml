@@ -1,0 +1,120 @@
+name: CI/CD — Build & Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # allow manual trigger from GitHub UI
+
+env:
+  REGISTRY: ghcr.io
+  # IMAGE_NAME becomes: ghcr.io/<owner>/<repo>  e.g. ghcr.io/johndoe/aruna-web
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ─── Job 1: Build Docker image and push to GHCR ─────────────────────────────
+  build:
+    name: Build & Push Image
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write # needed to push to ghcr.io
+
+    outputs:
+      image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }} # auto-provided by GitHub, no setup needed
+
+      - name: Extract image metadata (tags & labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # Tag with short git SHA:  sha-a1b2c3d
+            type=sha,prefix=sha-,format=short
+            # Also tag as :latest on every push to main
+            type=raw,value=latest
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          target: app
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Use GitHub Actions cache to speed up subsequent builds
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ─── Job 2: Deploy to VPS via SSH ───────────────────────────────────────────
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    needs: build # only runs after image is built & pushed
+    environment: production # optional: set up required approvals in GitHub
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          # Pass GHCR credentials and image name as env vars to the remote shell.
+          # appleboy/ssh-action masks these values in logs.
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+          APP_IMAGE: ${{ needs.build.outputs.image }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_SSH_PORT || 22 }}
+          envs: GHCR_TOKEN,GHCR_USER,APP_IMAGE
+          script: |
+            set -e
+
+            # ── 1. Navigate to project directory ─────────────────────────────
+            cd "${{ secrets.VPS_APP_PATH }}"
+
+            # ── 2. Pull latest code (docker-compose.yml, nginx config, etc.) ─
+            git pull origin main
+
+            # ── 3. Login to GHCR and pull the pre-built image ────────────────
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            docker pull "$APP_IMAGE"
+
+            # ── 4. Update APP_IMAGE in .env so Compose uses the GHCR image ───
+            if grep -q '^APP_IMAGE=' .env; then
+              sed -i "s|^APP_IMAGE=.*|APP_IMAGE=${APP_IMAGE}|" .env
+            else
+              echo "APP_IMAGE=${APP_IMAGE}" >> .env
+            fi
+
+            # ── 5. Remove stale public assets volume (rebuilt from new image) ─
+            docker volume rm aruna_web_public 2>/dev/null || true
+
+            # ── 6. Restart app container with new image ───────────────────────
+            #       --no-deps keeps db and redis running without interruption
+            docker compose up -d --no-deps app
+
+            # ── 7. Give app a moment to initialise, then refresh nginx ────────
+            sleep 5
+            docker compose up -d --no-deps nginx
+
+            # ── 8. Remove dangling images to save disk space ──────────────────
+            docker image prune -f
+
+            echo "✓ Deployment complete."

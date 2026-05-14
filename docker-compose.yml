@@ -1,0 +1,109 @@
+services:
+
+  # ─── PHP-FPM Application ────────────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: app
+    # Locally: uses locally built image (aruna-web:latest).
+    # On VPS via CI/CD: set APP_IMAGE=ghcr.io/<owner>/aruna-web:latest in .env
+    # so Docker Compose uses the pre-built image from GHCR.
+    image: ${APP_IMAGE:-aruna-web:latest}
+    container_name: aruna_app
+    restart: unless-stopped
+    working_dir: /var/www/html
+    volumes:
+      # Named volume shared with nginx for serving static files.
+      # Docker populates it from the image on first creation;
+      # run `deploy.sh` (or see README) to refresh it after rebuilds.
+      - public_data:/var/www/html/public
+      # Persistent Laravel storage (logs, uploaded files, etc.)
+      - storage_data:/var/www/html/storage
+      # Persistent bootstrap/cache (config/route/view caches)
+      - cache_data:/var/www/html/bootstrap/cache
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - aruna_network
+
+  # ─── Nginx Web Server ────────────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: aruna_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      # Same public volume as app — nginx serves static/build assets directly
+      - public_data:/var/www/html/public:ro
+      # Storage for serving user-uploaded files (public disk symlink target)
+      - storage_data:/var/www/html/storage:ro
+    depends_on:
+      - app
+    networks:
+      - aruna_network
+
+  # ─── MySQL Database ──────────────────────────────────────────────────────────
+  db:
+    image: mysql:8.0
+    container_name: aruna_db
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE}
+      MYSQL_USER: ${DB_USERNAME}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+    volumes:
+      - db_data:/var/lib/mysql
+    ports:
+      # Bind to localhost only — not accessible from outside the VPS
+      - "127.0.0.1:3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${DB_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - aruna_network
+
+  # ─── Redis (cache, sessions, queues) ─────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: aruna_redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - aruna_network
+
+networks:
+  aruna_network:
+    driver: bridge
+
+volumes:
+  public_data:
+    name: aruna_web_public
+  storage_data:
+    name: aruna_web_storage
+  cache_data:
+    name: aruna_web_cache
+  db_data:
+    name: aruna_web_db
+  redis_data:
+    name: aruna_web_redis
