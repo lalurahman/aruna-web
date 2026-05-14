@@ -5,9 +5,9 @@
 # =============================================================================
 FROM php:8.3-cli-alpine AS builder
 
-# Install Node 20, npm, and sqlite-dev headers for pdo_sqlite compilation.
-# Note: `pdo` is already compiled into PHP — only pdo_sqlite needs installing.
-RUN apk add --no-cache nodejs npm sqlite-dev \
+# Install Node 20, npm, git (needed by Composer), unzip (package extraction),
+# and sqlite-dev headers for pdo_sqlite compilation.
+RUN apk add --no-cache nodejs npm git unzip sqlite-dev \
     && docker-php-ext-install pdo_sqlite
 
 # Install Composer binary
@@ -20,6 +20,7 @@ COPY composer.json composer.lock ./
 RUN composer install \
     --no-dev \
     --no-interaction \
+    --no-scripts \
     --prefer-dist \
     --ignore-platform-reqs
 
