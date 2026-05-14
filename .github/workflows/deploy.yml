@@ -9,9 +9,6 @@ env:
   REGISTRY: ghcr.io
   # IMAGE_NAME becomes: ghcr.io/<owner>/<repo>  e.g. ghcr.io/johndoe/aruna-web
   IMAGE_NAME: ${{ github.repository }}
-  # Opt into Node.js 24 runtime now, before it becomes mandatory on 2026-06-02.
-  # Silences the "Node.js 20 actions are deprecated" warning for all actions below.
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   # ─── Job 1: Build Docker image and push to GHCR ─────────────────────────────
@@ -61,10 +58,10 @@ jobs:
           npm run build
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -72,7 +69,7 @@ jobs:
 
       - name: Extract image metadata (tags & labels)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -82,7 +79,7 @@ jobs:
             type=raw,value=latest
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
@@ -120,19 +117,23 @@ jobs:
             set -e
 
             # ── 1. Navigate to project directory ─────────────────────────────
+            echo "→ [1/7] Navigating to ${{ secrets.VPS_APP_PATH }}"
             cd "${{ secrets.VPS_APP_PATH }}"
 
             # ── 2. Pull latest code (docker-compose.yml, nginx config, etc.) ─
             # Note: the VPS deploy key must have read access to the GitHub repo.
             # Generate one with: ssh-keygen -t ed25519 -C "vps-deploy"
             # Add the public key as a GitHub Deploy Key (read-only).
+            echo "→ [2/7] Pulling latest code from GitHub"
             git pull origin main
 
             # ── 3. Login to GHCR and pull the pre-built image ────────────────
+            echo "→ [3/7] Logging in to GHCR and pulling image: $APP_IMAGE"
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
             docker pull "$APP_IMAGE"
 
             # ── 4. Update APP_IMAGE in .env so Compose uses the GHCR image ───
+            echo "→ [4/7] Updating APP_IMAGE in .env"
             if grep -q '^APP_IMAGE=' .env; then
               sed -i "s|^APP_IMAGE=.*|APP_IMAGE=${APP_IMAGE}|" .env
             else
@@ -140,13 +141,16 @@ jobs:
             fi
 
             # ── 5. Remove stale public assets volume (rebuilt from new image) ─
+            echo "→ [5/7] Removing stale public assets volume"
             docker volume rm aruna_web_public 2>/dev/null || true
 
             # ── 6. Restart app container with new image ───────────────────────
             #       --no-deps keeps db and redis running without interruption
+            echo "→ [6/7] Restarting app container"
             docker compose up -d --no-deps app
 
             # ── 7. Give app a moment to initialise, then refresh nginx ────────
+            echo "→ [7/7] Refreshing nginx"
             sleep 5
             docker compose up -d --no-deps nginx
 
