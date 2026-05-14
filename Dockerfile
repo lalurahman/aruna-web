@@ -20,7 +20,7 @@ RUN composer install \
 #   Installs ALL Composer deps (including dev) so that every service provider
 #   and artisan command is available when Laravel bootstraps.
 # =============================================================================
-FROM php:8.3-cli-alpine AS builder
+FROM php:8.4-cli-alpine AS builder
 
 # Full set of extensions Laravel needs to bootstrap (bcmath, intl, zip, etc.)
 # plus Node 20 + npm for the Vite build step.
@@ -69,7 +69,7 @@ RUN npm run build
 # =============================================================================
 # Stage 3 — Production PHP-FPM
 # =============================================================================
-FROM php:8.3-fpm-alpine AS app
+FROM php:8.4-fpm-alpine AS app
 
 # System packages and PHP extensions required by Laravel
 RUN apk add --no-cache \
