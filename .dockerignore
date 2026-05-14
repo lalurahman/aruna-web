@@ -15,7 +15,8 @@
 /node_modules
 /vendor
 
-# Frontend build output — pre-built on the CI runner, included in Docker context
+# Frontend build output — compiled in the Docker builder stage (Stage 2)
+/public/build
 /public/hot
 /public/fonts-manifest.dev.json
 

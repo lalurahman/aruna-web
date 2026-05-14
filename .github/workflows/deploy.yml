@@ -27,35 +27,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      # ── Pre-build: generate Wayfinder TS bindings + compile frontend ─────────
-      # Running these on the CI runner (not inside Docker) is more reliable
-      # because the ubuntu-latest environment has a well-tested PHP + Node stack.
-      # The compiled public/build/ directory is then passed into the Docker context.
-      - name: Setup PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.4'
-          tools: composer:v2
-
-      - name: Setup Node
-        uses: actions/setup-node@v5
-        with:
-          node-version: '22'
-
-      - name: Install Composer dependencies
-        run: composer install --no-interaction --no-scripts --prefer-dist --optimize-autoloader
-
-      - name: Install Node dependencies
-        run: npm ci
-
-      - name: Generate Wayfinder bindings and build frontend assets
-        run: |
-          cp .env.example .env
-          php artisan key:generate
-          mkdir -p database && touch database/database.sqlite
-          php artisan package:discover --ansi
-          php artisan wayfinder:generate
-          npm run build
+      # Wayfinder TS bindings and frontend assets are generated inside Docker
+      # (Dockerfile Stage 2 — builder). No pre-build steps needed here.
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4

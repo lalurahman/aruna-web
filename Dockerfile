@@ -16,9 +16,30 @@ RUN composer install \
 
 
 # =============================================================================
-# Stage 2 — Production PHP-FPM
-#   Wayfinder TS bindings and frontend assets are pre-built on the CI runner
-#   (deploy.yml) and included in the Docker build context via public/build/.
+# Stage 2 — Builder: generate Wayfinder TS bindings + compile frontend assets
+#   PHP 8.4 CLI + Node.js (Alpine) mirrors the project's requirements.
+#   Output: public/build/ — copied into the production stage below.
+# =============================================================================
+FROM php:8.4-cli-alpine AS builder
+
+RUN apk add --no-cache nodejs npm
+
+WORKDIR /app
+
+COPY . .
+COPY --from=vendor /app/vendor ./vendor
+
+RUN cp .env.example .env \
+    && php artisan key:generate \
+    && mkdir -p database && touch database/database.sqlite \
+    && php artisan package:discover --ansi \
+    && php artisan wayfinder:generate \
+    && npm ci \
+    && npm run build
+
+
+# =============================================================================
+# Stage 3 — Production PHP-FPM
 # =============================================================================
 FROM php:8.4-fpm-alpine AS app
 
@@ -49,12 +70,14 @@ RUN apk add --no-cache \
 WORKDIR /var/www/html
 
 # Copy application source from build context
-# (vendor, node_modules, .env excluded via .dockerignore;
-#  public/build is pre-built on CI and included in context)
+# (vendor, node_modules, .env, public/build excluded via .dockerignore)
 COPY --chown=www-data:www-data . .
 
 # Production vendor from Stage 1 (no dev deps — smaller, secure)
 COPY --from=vendor --chown=www-data:www-data /app/vendor ./vendor
+
+# Frontend assets compiled in Stage 2
+COPY --from=builder --chown=www-data:www-data /app/public/build ./public/build
 
 # Composer binary needed for dump-autoload below
 COPY --from=composer:2.8 /usr/bin/composer /usr/bin/composer
