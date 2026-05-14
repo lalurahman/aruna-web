@@ -9,6 +9,9 @@ env:
   REGISTRY: ghcr.io
   # IMAGE_NAME becomes: ghcr.io/<owner>/<repo>  e.g. ghcr.io/johndoe/aruna-web
   IMAGE_NAME: ${{ github.repository }}
+  # Opt into Node.js 24 runtime now, before it becomes mandatory on 2026-06-02.
+  # Silences the "Node.js 20 actions are deprecated" warning for all actions below.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   # ─── Job 1: Build Docker image and push to GHCR ─────────────────────────────
@@ -25,7 +28,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # ── Pre-build: generate Wayfinder TS bindings + compile frontend ─────────
       # Running these on the CI runner (not inside Docker) is more reliable
@@ -120,6 +123,9 @@ jobs:
             cd "${{ secrets.VPS_APP_PATH }}"
 
             # ── 2. Pull latest code (docker-compose.yml, nginx config, etc.) ─
+            # Note: the VPS deploy key must have read access to the GitHub repo.
+            # Generate one with: ssh-keygen -t ed25519 -C "vps-deploy"
+            # Add the public key as a GitHub Deploy Key (read-only).
             git pull origin main
 
             # ── 3. Login to GHCR and pull the pre-built image ────────────────
