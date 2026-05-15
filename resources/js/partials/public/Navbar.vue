@@ -31,12 +31,15 @@ const navOpen = ref(false);
             </a>
 
             <!-- Nav links -->
-            <div class="nav-links flex items-center gap-8" :class="{ open: navOpen }">
+            <div
+                class="nav-links flex items-center gap-8"
+                :class="[navOpen ? 'open' : '', 'md:flex', navOpen ? 'flex' : 'hidden']"
+            >
                 <a href="/" class="nav-link" :class="{ 'nav-link--active': active === 'home' }" @click="navOpen = false">Beranda</a>
                 <a href="/about" class="nav-link" :class="{ 'nav-link--active': active === 'about' }" @click="navOpen = false">Tentang</a>
                 <a href="/product" class="nav-link" :class="{ 'nav-link--active': active === 'product' }" @click="navOpen = false">Product</a>
                 <a href="/contact" class="nav-link" :class="{ 'nav-link--active': active === 'contact' }" @click="navOpen = false">Contact</a>
-                <a href="/contact" class="btn-primary md:hidden" @click="navOpen = false">
+                <a v-if="active !== 'home'" href="/contact" class="btn-primary md:hidden" @click="navOpen = false">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.63 19.79 19.79 0 01.14 1.05 2 2 0 012.11.01h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L6.91 7.91a16 16 0 006.18 6.18l1.27-.46a2 2 0 012.11.45 12.84 12.84 0 002.81.7A2 2 0 0122 16.92z" />
                     </svg>
